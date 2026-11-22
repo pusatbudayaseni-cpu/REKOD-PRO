@@ -210,6 +210,10 @@ details.card>summary{cursor:pointer;font-weight:700;font-size:1.02rem}
       <input id="kp" type="text" placeholder="Nama orang yang meminjam" autocomplete="off">
       <label class="f" for="kkl">Kelab</label>
       <select id="kkl" style="width:100%;margin-top:4px;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit"><option value="">— Pilih kelab —</option></select>
+      <div id="kkl2w" class="hidden">
+        <input id="kkl2" type="text" placeholder="Taip nama kelab" autocomplete="off" style="margin-top:8px">
+        <label style="display:flex;gap:8px;align-items:center;margin-top:8px;font-size:.9rem"><input type="checkbox" id="kkl3" checked style="width:18px;height:18px;margin:0">Simpan kelab ini dalam senarai untuk kegunaan akan datang</label>
+      </div>
       <label class="f" for="ktel">Nombor telefon</label>
       <input id="ktel" type="tel" inputmode="tel" placeholder="cth: 012-3456789" autocomplete="off">
       <label class="f" for="kpt">Nama petugas</label>
@@ -250,7 +254,7 @@ details.card>summary{cursor:pointer;font-weight:700;font-size:1.02rem}
     <div class="msg" id="kxm"></div>
     <div id="klist"></div>
   </div>
-  <p class="mute" style="font-size:.75rem;text-align:center;margin-top:28px">Versi 17 · data peribadi setiap akaun</p>
+  <p class="mute" style="font-size:.75rem;text-align:center;margin-top:28px">Versi 18 · data peribadi setiap akaun</p>
 </section>
 
 </main>
@@ -851,8 +855,9 @@ var firebaseConfig = {
     if(!n){say('kmsg','Sila isi nama peminjam.',true);$('kp').focus();return;}
     if(tel.replace(/\D/g,'').length<9){say('kmsg','Sila isi nombor telefon yang sah (sekurang-kurangnya 9 digit).',true);$('ktel').focus();return;}
     if(!pt){say('kmsg','Sila isi nama petugas.',true);$('kpt').focus();return;}
-    var kl=$('kkl').value;
-    if(!kl){say('kmsg','Sila pilih kelab (atau Individu / Tiada kelab).',true);$('kkl').focus();return;}
+    var kl=$('kkl').value,lain=(kl==='__lain');
+    if(lain){kl=$('kkl2').value.trim();if(!kl){say('kmsg','Sila taip nama kelab.',true);$('kkl2').focus();return;}}
+    else if(!kl){say('kmsg','Sila pilih kelab (atau Individu / Tiada kelab), atau pilih Lain-lain untuk menaip.',true);$('kkl').focus();return;}
     if(!a){say('kmsg','Sila pilih tarikh ambil.',true);return;}
     var taken=sel.filter(function(k){return actByKid(k.kid);});
     if(taken.length){say('kmsg','❌ '+taken.map(function(k){return k.nama;}).join(', ')+' baru sahaja dipinjam. Senarai dikemas kini.',true);renderKeys();return;}
@@ -864,8 +869,12 @@ var firebaseConfig = {
       bt.set(ref,{uid:u.uid,by:u.email||'',kunci:k.nama,kid:k.kid,peminjam:n,kelab:kl,telefon:tel,petugas:pt,thumb:k.thumb||'',dari:a,tujuan:tujuan,ts:now,dipulang:null,tarikhPulang:''});
       bt.set(db.collection('kunci_aktif').doc('k_'+k.kid),{uid:u.uid,kid:k.kid,kunci:k.nama,peminjam:n,kelab:kl,dari:a,loanId:ref.id,aktif:true});
     });
+    if(lain&&$('kkl3').checked){
+      var cid=kid(kl);
+      if(cid&&!clubs.some(function(c){return c.kid===cid;}))bt.set(db.collection('kunci_senarai').doc('c_'+cid),{uid:u.uid,kid:cid,jenis:'kelab',nama:kl,ts:now});
+    }
     bt.commit().then(function(){
-      var cnt=sel.length;selKeys={};$('ktel').value='';$('kt').value='';
+      var cnt=sel.length;$('kkl').value='';$('kkl2').value='';klToggle();selKeys={};$('ktel').value='';$('kt').value='';
       say('kmsg','✅ '+cnt+' kunci dipinjam oleh '+n+' ('+fmt(a)+'). Tarikh pulang akan diisi bila dipulangkan.');
       renderKeys();
     }).catch(function(e){
@@ -916,6 +925,7 @@ var firebaseConfig = {
     opt('','— Pilih kelab —');
     list.forEach(function(c){opt(c.nama,c.nama);});
     opt('Individu','Individu / Tiada kelab');
+    opt('__lain','Lain-lain (taip sendiri)…');
     sel.value=cur;if(sel.value!==cur)sel.value='';
     var box=$('kllist');
     if(!list.length){box.innerHTML='<div class="mute">Belum ada kelab dalam senarai.</div>';return;}
@@ -935,6 +945,8 @@ var firebaseConfig = {
       box.appendChild(d);
     });
   }
+  function klToggle(){$('kkl2w').classList.toggle('hidden',$('kkl').value!=='__lain');if($('kkl').value==='__lain')$('kkl2').focus();}
+  $('kkl').addEventListener('change',klToggle);
   $('nklsave').onclick=function(){
     var u=auth.currentUser;if(!u)return;
     var name=$('nkl').value.trim(),id=kid(name);
