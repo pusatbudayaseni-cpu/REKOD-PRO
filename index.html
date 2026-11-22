@@ -69,7 +69,8 @@ input[type=month],input[type=datetime-local]{width:100%;margin-top:4px;padding:1
 .kcard.off{background:var(--line);cursor:not-allowed}
 .kcard.off img,.kcard.off .noimg,.kcard.off .kn{filter:grayscale(1);opacity:.45}
 .kcard .kchk{position:absolute;top:6px;left:6px;width:24px;height:24px;margin:0;accent-color:var(--brand);pointer-events:none}
-.kcard .kbtn{position:absolute;top:4px;right:4px;border:0;border-radius:8px;background:rgba(0,0,0,.55);color:#fff;font:inherit;font-size:.78rem;padding:3px 7px;cursor:pointer}
+.kcard .kbtns{position:absolute;top:4px;right:4px;display:flex;gap:4px}
+.kcard .kbtn{border:0;border-radius:8px;background:rgba(0,0,0,.55);color:#fff;font:inherit;font-size:.78rem;padding:3px 7px;cursor:pointer}
 .kcard .kret{position:absolute;left:6px;right:6px;bottom:6px;border:0;border-radius:8px;background:var(--brand);color:var(--brand-ink);font:inherit;font-weight:700;font-size:.8rem;padding:6px;cursor:pointer}
 .row.grey{background:var(--line)}
 .row.grey img,.row.grey .t{filter:grayscale(1);opacity:.65}
@@ -226,8 +227,8 @@ details.card>summary{cursor:pointer;font-weight:700;font-size:1.02rem}
       <button class="go" id="ksave" type="button" disabled>🔑 Pinjam Kunci yang Ditanda</button>
       <div class="msg" id="kmsg"></div>
     </div>
-    <details class="card">
-      <summary>➕ Tambah kunci ke senarai</summary>
+    <details class="card" id="kdet">
+      <summary>➕ Tambah / edit kunci</summary>
       <div class="pick" style="margin-top:10px">
         <label for="nkcam"><span>📷</span>Snap Kunci</label>
         <label for="nkgal"><span>🖼️</span>Upload Gambar</label>
@@ -239,6 +240,7 @@ details.card>summary{cursor:pointer;font-weight:700;font-size:1.02rem}
       <label class="f" for="nkn">Nama kunci</label>
       <input id="nkn" type="text" placeholder="cth: Kunci Bilik Mesyuarat" autocomplete="off">
       <button class="go" id="nksave" type="button">💾 Simpan ke Senarai</button>
+      <button class="go hidden" id="nkcancel" type="button" style="background:none;color:var(--mute);border:1px solid var(--line);margin-top:8px">Batal edit</button>
       <div class="msg" id="nkmsg"></div>
     </details>
     <details class="card">
@@ -254,7 +256,7 @@ details.card>summary{cursor:pointer;font-weight:700;font-size:1.02rem}
     <div class="msg" id="kxm"></div>
     <div id="klist"></div>
   </div>
-  <p class="mute" style="font-size:.75rem;text-align:center;margin-top:28px">Versi 18 · data peribadi setiap akaun</p>
+  <p class="mute" style="font-size:.75rem;text-align:center;margin-top:28px">Versi 19 · data peribadi setiap akaun</p>
 </section>
 
 </main>
@@ -774,7 +776,7 @@ var firebaseConfig = {
     list.forEach(function(a){
       var k=keys.filter(function(x){return x.kid===a.kid;})[0];
       var d=document.createElement('div');d.className='row grey';d.style.alignItems='center';
-      d.innerHTML=(k&&k.thumb?'<img src="'+k.thumb+'" alt="">':'')+'<div class="t"><b>🔑 '+esc(a.kunci)+'</b><div class="n">Peminjam: '+esc(a.peminjam)+'</div>'+(a.kelab?'<div class="n">Kelab: '+esc(a.kelab)+'</div>':'')+'<div class="n">Sejak: '+fmt(a.dari)+'</div></div>';
+      d.innerHTML=(k&&k.thumb?'<img src="'+k.thumb+'" alt="">':'')+'<div class="t"><b>🔑 '+esc((k&&k.nama)||a.kunci)+'</b><div class="n">Peminjam: '+esc(a.peminjam)+'</div>'+(a.kelab?'<div class="n">Kelab: '+esc(a.kelab)+'</div>':'')+'<div class="n">Sejak: '+fmt(a.dari)+'</div></div>';
       if(u&&a.uid===u.uid){
         var loan=loans.filter(function(l){return l.id===a.loanId;})[0];
         if(loan){var rb=document.createElement('button');rb.type='button';rb.className='x';rb.style.fontSize='.85rem';rb.textContent='↩️ Pulang';rb.onclick=function(){doReturn(loan,rb);};d.appendChild(rb);}
@@ -794,15 +796,22 @@ var firebaseConfig = {
       d.innerHTML=(k.thumb?'<img src="'+k.thumb+'" alt="">':'<div class="noimg">🔑</div>')+
         '<div class="kn"><b>'+esc(k.nama)+'</b>'+(off?'<small>Dipinjam: '+esc(a.peminjam)+(a.kelab?'<br>'+esc(a.kelab):'')+'<br>sejak '+fmt(a.dari)+'</small>':'<small class="ok">Tersedia</small>')+'</div>'+
         '<input type="checkbox" class="kchk" tabindex="-1" aria-label="Pilih"'+(on?' checked':'')+(off?' disabled':'')+'>';
-      if(!off&&u&&k.uid===u.uid){
-        var del=document.createElement('button');del.type='button';del.className='kbtn';del.textContent='✕';del.title='Buang dari senarai';
-        var armed=false;
-        del.onclick=function(e){
-          e.stopPropagation();
-          if(!armed){armed=true;del.textContent='Buang?';setTimeout(function(){armed=false;del.textContent='✕';},3000);return;}
-          db.collection('kunci_senarai').doc('k_'+k.kid).delete().catch(function(er){say('kmsg','Gagal buang. '+why(er),true);});
-        };
-        d.appendChild(del);
+      if(u&&k.uid===u.uid){
+        var bx=document.createElement('div');bx.className='kbtns';
+        var ed=document.createElement('button');ed.type='button';ed.className='kbtn';ed.textContent='✏️';ed.title='Edit kunci';
+        ed.onclick=function(e){e.stopPropagation();startEditKey(k);};
+        bx.appendChild(ed);
+        if(!off){
+          var del=document.createElement('button');del.type='button';del.className='kbtn';del.textContent='✕';del.title='Buang dari senarai';
+          var armed=false;
+          del.onclick=function(e){
+            e.stopPropagation();
+            if(!armed){armed=true;del.textContent='Buang?';setTimeout(function(){armed=false;del.textContent='✕';},3000);return;}
+            db.collection('kunci_senarai').doc('k_'+k.kid).delete().catch(function(er){say('kmsg','Gagal buang. '+why(er),true);});
+          };
+          bx.appendChild(del);
+        }
+        d.appendChild(bx);
       }
       if(off&&mine){
         var loan=loans.filter(function(l){return l.id===a.loanId;})[0];
@@ -833,15 +842,36 @@ var firebaseConfig = {
   ['nkcam','nkgal'].forEach(function(id){var el=$(id);el.addEventListener('change',function(){var f=el.files&&el.files[0];el.value='';nkpick(f);});});
   function nkclear(){nkcur=null;var pv=$('nkpv');pv.style.display='none';pv.removeAttribute('src');$('nkclr').style.display='none';}
   $('nkclr').onclick=nkclear;
+  var editK=null;
+  function nkReset(){nkclear();$('nkn').value='';editK=null;$('nksave').textContent='💾 Simpan ke Senarai';$('nkcancel').classList.add('hidden');}
+  $('nkcancel').onclick=function(){nkReset();say('nkmsg','Edit dibatalkan.');};
+  function startEditKey(k){
+    editK=k.kid;$('nkn').value=k.nama||'';nkcur=k.thumb||null;
+    var pv=$('nkpv');
+    if(k.thumb){pv.src=k.thumb;pv.style.display='block';$('nkclr').style.display='inline';}else{pv.style.display='none';pv.removeAttribute('src');$('nkclr').style.display='none';}
+    $('nksave').textContent='💾 Kemas kini Kunci';$('nkcancel').classList.remove('hidden');
+    $('kdet').open=true;
+    say('nkmsg','✏️ Sedang edit "'+k.nama+'". Tukar nama atau gambar, kemudian tekan Kemas kini.');
+    $('kdet').scrollIntoView({behavior:'smooth',block:'center'});$('nkn').focus();
+  }
   $('nksave').onclick=function(){
     var u=auth.currentUser;if(!u)return;
-    var name=$('nkn').value.trim(),id=kid(name);
+    var name=$('nkn').value.trim(),id=kid(name),b=$('nksave');
     if(!name){say('nkmsg','Sila isi nama kunci.',true);$('nkn').focus();return;}
     if(!id){say('nkmsg','Nama kunci mesti ada huruf atau nombor.',true);return;}
-    if(keys.some(function(k){return k.kid===id;})){say('nkmsg','Kunci dengan nama ini sudah ada dalam senarai.',true);return;}
-    var b=$('nksave');b.disabled=true;
+    if(editK){
+      if(keys.some(function(x){return x.kid!==editK&&(x.kid===id||kid(x.nama)===id);})){say('nkmsg','Nama ini sudah digunakan oleh kunci lain.',true);return;}
+      b.disabled=true;
+      db.collection('kunci_senarai').doc('k_'+editK).update({nama:name,thumb:nkcur||'',edited:Date.now()})
+        .then(function(){nkReset();say('nkmsg','✅ Kunci dikemas kini.');})
+        .catch(function(e){say('nkmsg',(e&&e.code==='permission-denied')?'Gagal. Hanya akaun yang menambah kunci ini boleh mengeditnya.':'Gagal simpan. '+why(e),true);})
+        .then(function(){b.disabled=false;});
+      return;
+    }
+    if(keys.some(function(k){return k.kid===id||kid(k.nama)===id;})){say('nkmsg','Kunci dengan nama ini sudah ada dalam senarai.',true);return;}
+    b.disabled=true;
     db.collection('kunci_senarai').doc('k_'+id).set({uid:u.uid,kid:id,nama:name,thumb:nkcur||'',ts:Date.now()})
-      .then(function(){$('nkn').value='';nkclear();say('nkmsg','✅ "'+name+'" ditambah ke senarai.');})
+      .then(function(){nkReset();say('nkmsg','✅ "'+name+'" ditambah ke senarai.');})
       .catch(function(e){say('nkmsg',(e&&e.code==='permission-denied')?'Gagal. Nama ini mungkin sudah wujud, atau peraturan Firestore untuk "kunci_senarai" belum dikemas kini.':'Gagal simpan. '+why(e),true);})
       .then(function(){b.disabled=false;});
   };
