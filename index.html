@@ -175,7 +175,7 @@ input[type=month],input[type=datetime-local]{width:100%;margin-top:4px;padding:1
     <div id="clist"></div>
   </div>
   <div id="paneC" class="hidden">
-    <p class="sub">Rekod pinjaman kunci. Satu kunci tak boleh dipinjam oleh dua orang pada tarikh yang sama.</p>
+    <p class="sub">Rekod pinjaman kunci. Tarikh pulang dikosongkan sehingga kunci dipulangkan. Satu kunci tak boleh dipinjam lagi selagi belum dipulang.</p>
     <div class="card">
       <h2>Tambah pinjaman</h2>
       <label class="f">Gambar kunci</label>
@@ -190,31 +190,31 @@ input[type=month],input[type=datetime-local]{width:100%;margin-top:4px;padding:1
       <label class="f" for="kn">Nama kunci</label>
       <input id="kn" type="text" list="dkn" placeholder="cth: Kunci Bilik Mesyuarat" autocomplete="off">
       <datalist id="dkn"></datalist>
+      <div class="msg" id="kst"></div>
       <label class="f" for="kp">Nama peminjam</label>
       <input id="kp" type="text" placeholder="Nama orang yang meminjam" autocomplete="off">
       <label class="f" for="ktel">Nombor telefon</label>
       <input id="ktel" type="tel" inputmode="tel" placeholder="cth: 012-3456789" autocomplete="off">
-      <div class="two">
-        <div><label class="f" for="kd1">Tarikh ambil</label><input id="kd1" type="date"></div>
-        <div><label class="f" for="kd2">Tarikh pulang</label><input id="kd2" type="date"></div>
-      </div>
-      <div class="msg" id="kst"></div>
+      <label class="f" for="kpt">Nama petugas</label>
+      <input id="kpt" type="text" placeholder="Nama petugas yang menyerahkan kunci" autocomplete="off">
+      <label class="f" for="kd1">Tarikh ambil</label>
+      <input id="kd1" type="date">
+      <div class="mute" style="font-size:.85rem;margin-top:6px">Tarikh pulang: dikosongkan, akan diisi bila awak tekan <strong>↩️ Pulang</strong>.</div>
       <label class="f" for="kt">Tujuan (pilihan)</label>
       <input id="kt" type="text" placeholder="cth: Mesyuarat jabatan" autocomplete="off">
       <button class="go" id="ksave" type="button">🔑 Simpan Pinjaman</button>
       <div class="msg" id="kmsg"></div>
     </div>
     <div class="card">
-      <h2>📅 Siapa pinjam kunci pada tarikh</h2>
-      <input id="kv" type="date" aria-label="Pilih tarikh">
-      <div id="kov" style="margin-top:8px"></div>
+      <h2>🔑 Kunci sedang dipinjam sekarang</h2>
+      <div id="kov" style="margin-top:6px"></div>
     </div>
     <div class="top"><h2>Pinjaman saya (<span id="kcnt">0</span>)</h2></div>
     <button class="go" id="kxls" type="button" style="margin-top:10px">📥 Muat Turun Excel (Kunci)</button>
     <div class="msg" id="kxm"></div>
     <div id="klist"></div>
   </div>
-  <p class="mute" style="font-size:.75rem;text-align:center;margin-top:28px">Versi 13 · data peribadi setiap akaun</p>
+  <p class="mute" style="font-size:.75rem;text-align:center;margin-top:28px">Versi 14 · data peribadi setiap akaun</p>
 </section>
 
 </main>
@@ -702,33 +702,21 @@ var firebaseConfig = {
 
 
   /* ---------- PINJAMAN KUNCI ---------- */
-  var loans=[],kdays=[],lnUnsub=null,dyUnsub=null;
+  var loans=[],aktif=[],lnUnsub=null,akUnsub=null,PN='kunci:petugas',kcur=null;
   function kid(n){return (n||'').toLowerCase().trim().replace(/\s+/g,'-').replace(/[^a-z0-9-]/g,'').slice(0,40);}
-  function addDays(ds,n){var d=new Date(ds+'T00:00:00');d.setDate(d.getDate()+n);return ymd(d.getTime());}
-  function dateRange(a,b){var out=[],c=a;while(c<=b&&out.length<=32){out.push(c);c=addDays(c,1);}return out;}
-  function findClash(k,dates){
-    var id=kid(k);
-    for(var i=0;i<kdays.length;i++){if(kdays[i].kid===id&&dates.indexOf(kdays[i].date)>-1)return kdays[i];}
-    return null;
-  }
+  function activeOf(k){var id=kid(k);for(var i=0;i<aktif.length;i++){if(aktif[i].kid===id)return aktif[i];}return null;}
   function checkAvail(){
-    var k=$('kn').value.trim(),a=$('kd1').value,b=$('kd2').value||a,box=$('kst'),btn=$('ksave');
+    var k=$('kn').value.trim(),box=$('kst'),btn=$('ksave');
     box.className='msg';
-    if(!k||!a){box.textContent='';btn.disabled=false;return null;}
-    if(!kid(k)){box.textContent='⚠️ Nama kunci mesti ada huruf atau nombor.';box.className='msg err';btn.disabled=true;return null;}
-    if(b<a){box.textContent='⚠️ Tarikh pulang mesti sama atau selepas tarikh ambil.';box.className='msg err';btn.disabled=true;return null;}
-    var dates=dateRange(a,b);
-    if(dates.length>31){box.textContent='⚠️ Maksimum 31 hari bagi satu pinjaman.';box.className='msg err';btn.disabled=true;return null;}
-    var c=findClash(k,dates);
-    if(c){box.textContent='❌ "'+c.kunci+'" sudah dipinjam oleh '+c.peminjam+' pada '+fmt(c.date)+'. Pilih tarikh atau kunci lain.';box.className='msg err';btn.disabled=true;return null;}
-    box.textContent='✅ "'+k+'" tersedia '+(dates.length>1?'untuk '+dates.length+' hari ('+fmt(a)+' - '+fmt(b)+')':'pada '+fmt(a))+'.';
-    btn.disabled=false;return dates;
+    if(!k){box.textContent='';btn.disabled=false;return false;}
+    if(!kid(k)){box.textContent='⚠️ Nama kunci mesti ada huruf atau nombor.';box.className='msg err';btn.disabled=true;return false;}
+    var c=activeOf(k);
+    if(c){box.textContent='❌ "'+c.kunci+'" sedang dipinjam oleh '+c.peminjam+' sejak '+fmt(c.dari)+'. Tunggu sehingga dipulangkan.';box.className='msg err';btn.disabled=true;return false;}
+    box.textContent='✅ "'+k+'" tersedia.';btn.disabled=false;return true;
   }
-  ['kn','kd1','kd2'].forEach(function(id){$(id).addEventListener('input',checkAvail);$(id).addEventListener('change',checkAvail);});
-  $('kd1').addEventListener('change',function(){if(!$('kd2').value||$('kd2').value<$('kd1').value){$('kd2').value=$('kd1').value;}checkAvail();});
-  $('kd1').value=ymd(Date.now());$('kd2').value=ymd(Date.now());$('kv').value=ymd(Date.now());
+  $('kn').addEventListener('input',checkAvail);$('kn').addEventListener('change',checkAvail);
+  $('kd1').value=ymd(Date.now());
 
-  var kcur=null;
   async function kpick(file){
     if(!file)return;
     try{kcur=await prep(file);var pv=$('kpv');pv.src=kcur;pv.style.display='block';$('kclr').style.display='inline';}
@@ -740,32 +728,30 @@ var firebaseConfig = {
 
   $('ksave').onclick=function(){
     var u=auth.currentUser;if(!u)return;
-    var k=$('kn').value.trim(),n=$('kp').value.trim(),a=$('kd1').value,b=$('kd2').value||a;
+    var k=$('kn').value.trim(),n=$('kp').value.trim(),pt=$('kpt').value.trim(),a=$('kd1').value;
+    var tel=($('ktel').value||'').replace(/[^\d+\-\s()]/g,'').trim();
     if(!k){say('kmsg','Sila isi nama kunci.',true);$('kn').focus();return;}
     if(!n){say('kmsg','Sila isi nama peminjam.',true);$('kp').focus();return;}
-    var tel=($('ktel').value||'').replace(/[^\d+\-\s()]/g,'').trim();
     if(tel.replace(/\D/g,'').length<9){say('kmsg','Sila isi nombor telefon yang sah (sekurang-kurangnya 9 digit).',true);$('ktel').focus();return;}
+    if(!pt){say('kmsg','Sila isi nama petugas.',true);$('kpt').focus();return;}
     if(!a){say('kmsg','Sila pilih tarikh ambil.',true);return;}
-    var dates=checkAvail();
-    if(!dates){say('kmsg','Kunci tak tersedia atau tarikh tak sah. Semak mesej di atas.',true);return;}
-    try{localStorage.setItem(NK,n);}catch(e){}
+    if(!checkAvail()){say('kmsg','Kunci tak tersedia. Semak mesej di atas.',true);return;}
+    try{localStorage.setItem(NK,n);localStorage.setItem(PN,pt);}catch(e){}
     var id=kid(k),btn=$('ksave');btn.disabled=true;
     var ref=db.collection('kunci').doc(),bt=db.batch();
-    bt.set(ref,{uid:u.uid,by:u.email||'',kunci:k,kid:id,peminjam:n,telefon:tel,thumb:kcur||'',dari:a,hingga:b,tujuan:$('kt').value.trim(),ts:Date.now(),dipulang:null});
-    dates.forEach(function(d){bt.set(db.collection('kunci_hari').doc('k_'+id+'_'+d),{uid:u.uid,kid:id,kunci:k,date:d,peminjam:n,loanId:ref.id});});
+    bt.set(ref,{uid:u.uid,by:u.email||'',kunci:k,kid:id,peminjam:n,telefon:tel,petugas:pt,thumb:kcur||'',dari:a,tujuan:$('kt').value.trim(),ts:Date.now(),dipulang:null,tarikhPulang:''});
+    bt.set(db.collection('kunci_aktif').doc('k_'+id),{uid:u.uid,kid:id,kunci:k,peminjam:n,dari:a,loanId:ref.id,aktif:true});
     bt.commit().then(function(){
       $('kn').value='';$('kt').value='';$('ktel').value='';kclear();$('kst').textContent='';
-      say('kmsg','✅ Pinjaman direkod ('+k+', '+fmt(a)+(b!==a?' - '+fmt(b):'')+').');
+      say('kmsg','✅ Pinjaman direkod ('+k+', '+fmt(a)+'). Tarikh pulang akan diisi bila kunci dipulangkan.');
     }).catch(function(e){
-      say('kmsg',(e&&e.code==='permission-denied')?'❌ Gagal. Kunci ini mungkin baru sahaja dipinjam oleh orang lain pada tarikh yang sama, atau peraturan Firestore untuk "kunci" belum dikemas kini.':'Gagal simpan. '+why(e),true);
+      say('kmsg',(e&&e.code==='permission-denied')?'❌ Gagal. Kunci ini mungkin baru sahaja dipinjam oleh orang lain, atau peraturan Firestore untuk "kunci" dan "kunci_aktif" belum dikemas kini.':'Gagal simpan. '+why(e),true);
     }).then(function(){btn.disabled=false;checkAvail();});
   };
 
   function loanStatus(r){
-    var t=ymd(Date.now());
-    if(r.dipulang)return '✅ Dipulang '+fmt(ymd(r.dipulang))+' '+hm(r.dipulang);
-    if(r.hingga<t)return '⚠️ Lewat dipulang (sepatutnya '+fmt(r.hingga)+')';
-    return '🔑 Sedang dipinjam';
+    if(r.dipulang)return '✅ Dipulang '+fmt(r.tarikhPulang||ymd(r.dipulang))+' '+hm(r.dipulang);
+    return '🔑 Belum dipulang (sejak '+fmt(r.dari)+')';
   }
   function renderLoans(){
     var box=$('klist');$('kcnt').textContent=loans.length;
@@ -773,65 +759,67 @@ var firebaseConfig = {
     box.innerHTML='';
     loans.forEach(function(r){
       var d=document.createElement('div');d.className='row';
-      var n=dateRange(r.dari,r.hingga).length;
       d.innerHTML=(r.thumb?'<img src="'+r.thumb+'" alt="">':'')+'<div class="t"><b>'+esc(r.kunci)+'</b><div class="n">Peminjam: '+esc(r.peminjam)+'</div>'+
         (r.telefon?'<div class="n">📞 <a href="tel:'+esc(r.telefon)+'" style="color:inherit">'+esc(r.telefon)+'</a></div>':'')+
-        '<div class="n">Ambil: '+fmt(r.dari)+' · Pulang: '+fmt(r.hingga)+(n>1?' ('+n+' hari)':'')+'</div>'+
-        '<div class="n"'+((!r.dipulang&&r.hingga<ymd(Date.now()))?' style="color:var(--bad)"':'')+'>'+loanStatus(r)+'</div>'+
+        (r.petugas?'<div class="n">Petugas: '+esc(r.petugas)+'</div>':'')+
+        '<div class="n">Ambil: '+fmt(r.dari)+' · Pulang: '+(r.dipulang?fmt(r.tarikhPulang||ymd(r.dipulang))+' '+hm(r.dipulang):'—')+'</div>'+
+        '<div class="n"'+(r.dipulang?'':' style="color:var(--bad)"')+'>'+loanStatus(r)+'</div>'+
         (r.tujuan?'<div class="n">'+esc(r.tujuan)+'</div>':'')+'</div>'+
         (r.dipulang?'':'<button class="x ret" type="button" style="font-size:.85rem" title="Tandakan sudah dipulang">↩️ Pulang</button>')+
         '<button class="x del" type="button" aria-label="Padam">✕</button>';
       var rb=d.querySelector('.ret');
       if(rb)rb.onclick=function(){
         rb.disabled=true;
-        db.collection('kunci_hari').where('loanId','==',r.id).get().then(function(sn){
-          var t=ymd(Date.now()),bt=db.batch();
-          bt.update(db.collection('kunci').doc(r.id),{dipulang:Date.now()});
-          sn.docs.forEach(function(x){if(x.data().date>t)bt.delete(x.ref);});
+        var mref=db.collection('kunci_aktif').doc('k_'+r.kid);
+        mref.get().then(function(doc){
+          var bt=db.batch(),now=Date.now();
+          bt.update(db.collection('kunci').doc(r.id),{dipulang:now,tarikhPulang:ymd(now)});
+          if(doc.exists&&doc.data().loanId===r.id)bt.delete(mref);
           return bt.commit();
-        }).catch(function(e){rb.disabled=false;say('kmsg','Gagal. '+why(e),true);});
+        }).then(function(){say('kmsg','✅ Kunci "'+r.kunci+'" dipulangkan.');}).catch(function(e){rb.disabled=false;say('kmsg','Gagal. '+why(e),true);});
       };
       var x=d.querySelector('.del'),armed=false;
       x.onclick=function(){
         if(!armed){armed=true;x.textContent='Padam?';setTimeout(function(){armed=false;x.textContent='✕';},3000);return;}
-        db.collection('kunci_hari').where('loanId','==',r.id).get().then(function(sn){
+        var mref=db.collection('kunci_aktif').doc('k_'+r.kid);
+        mref.get().then(function(doc){
           var bt=db.batch();bt.delete(db.collection('kunci').doc(r.id));
-          sn.docs.forEach(function(y){bt.delete(y.ref);});
+          if(doc.exists&&doc.data().loanId===r.id)bt.delete(mref);
           return bt.commit();
         }).catch(function(e){say('kmsg','Gagal padam. '+why(e),true);});
       };
       box.appendChild(d);
     });
   }
-  function renderWho(){
-    var dt=$('kv').value,box=$('kov');
-    var list=kdays.filter(function(x){return x.date===dt;}).sort(function(a,b){return (a.kunci||'').localeCompare(b.kunci||'');});
-    if(!dt){box.innerHTML='';return;}
-    if(!list.length){box.innerHTML='<div class="mute">Tiada kunci dipinjam pada '+fmt(dt)+'.</div>';return;}
-    box.innerHTML=list.map(function(x){return '<div class="n" style="padding:4px 0;border-bottom:1px solid var(--line)"><strong>🔑 '+esc(x.kunci)+'</strong> · '+esc(x.peminjam)+'</div>';}).join('');
+  function renderActive(){
+    var box=$('kov');
+    var list=aktif.slice().sort(function(a,b){return (a.kunci||'').localeCompare(b.kunci||'');});
+    if(!list.length){box.innerHTML='<div class="mute">Tiada kunci sedang dipinjam.</div>';return;}
+    box.innerHTML=list.map(function(x){return '<div class="n" style="padding:5px 0;border-bottom:1px solid var(--line)"><strong>🔑 '+esc(x.kunci)+'</strong> · '+esc(x.peminjam)+' · sejak '+fmt(x.dari)+'</div>';}).join('');
   }
   function renderKeyNames(){
     var seen={},dl=$('dkn');dl.innerHTML='';
-    kdays.concat(loans).forEach(function(x){var v=(x.kunci||'').trim(),k=kid(v);if(v&&k&&!seen[k]){seen[k]=1;var o=document.createElement('option');o.value=v;dl.appendChild(o);}});
+    aktif.concat(loans).forEach(function(x){var v=(x.kunci||'').trim(),k=kid(v);if(v&&k&&!seen[k]){seen[k]=1;var o=document.createElement('option');o.value=v;dl.appendChild(o);}});
   }
-  $('kv').addEventListener('change',renderWho);
 
   auth.onAuthStateChanged(function(u){
     if(lnUnsub){lnUnsub();lnUnsub=null;}
-    if(dyUnsub){dyUnsub();dyUnsub=null;}
-    if(!u){loans=[];kdays=[];renderLoans();return;}
-    if(!$('kp').value){try{$('kp').value=localStorage.getItem(NK)||(u.email||'').split('@')[0];}catch(e){$('kp').value=(u.email||'').split('@')[0];}}
+    if(akUnsub){akUnsub();akUnsub=null;}
+    if(!u){loans=[];aktif=[];renderLoans();renderActive();return;}
+    try{
+      if(!$('kp').value)$('kp').value=localStorage.getItem(NK)||(u.email||'').split('@')[0];
+      if(!$('kpt').value)$('kpt').value=localStorage.getItem(PN)||'';
+    }catch(e){if(!$('kp').value)$('kp').value=(u.email||'').split('@')[0];}
     lnUnsub=db.collection('kunci').where('uid','==',u.uid).onSnapshot(function(sn){
-      loans=sn.docs.map(function(d){var o=d.data();o.id=d.id;return o;}).sort(function(a,b){return (b.dari>a.dari)-(b.dari<a.dari)||(b.ts-a.ts);});
+      loans=sn.docs.map(function(d){var o=d.data();o.id=d.id;return o;}).sort(function(a,b){return (b.ts||0)-(a.ts||0);});
       renderLoans();renderKeyNames();
     },function(){say('kmsg','Gagal memuatkan pinjaman. Semak peraturan Firestore untuk "kunci".',true);});
-    var minD=ymd(Date.now()-60*86400000);
-    dyUnsub=db.collection('kunci_hari').where('date','>=',minD).onSnapshot(function(sn){
-      kdays=sn.docs.map(function(d){var o=d.data();o.id=d.id;return o;});
-      renderWho();renderKeyNames();checkAvail();
-    },function(){say('kmsg','Gagal menyemak ketersediaan. Semak peraturan Firestore untuk "kunci_hari".',true);});
+    akUnsub=db.collection('kunci_aktif').onSnapshot(function(sn){
+      aktif=sn.docs.map(function(d){var o=d.data();o.id=d.id;return o;}).filter(function(x){return x.aktif===true;});
+      renderActive();renderKeyNames();checkAvail();
+    },function(){say('kmsg','Gagal menyemak ketersediaan. Semak peraturan Firestore untuk "kunci_aktif".',true);});
   });
-  renderLoans();
+  renderLoans();renderActive();
 
   $('kxls').onclick=async function(){
     var btn=$('kxls');say('kxm','');
@@ -840,15 +828,15 @@ var firebaseConfig = {
     btn.disabled=true;btn.textContent='Menyediakan Excel…';
     try{
       var wb=new ExcelJS.Workbook(),ws=wb.addWorksheet('Pinjaman Kunci');
-      ws.columns=[{header:'Bil',width:6},{header:'Gambar',width:16},{header:'Kunci',width:28},{header:'Peminjam',width:24},{header:'No. Telefon',width:16},{header:'Tarikh Ambil',width:14},{header:'Tarikh Pulang',width:14},{header:'Tujuan',width:30},{header:'Status',width:32}];
+      ws.columns=[{header:'Bil',width:6},{header:'Gambar',width:16},{header:'Kunci',width:26},{header:'Peminjam',width:22},{header:'No. Telefon',width:15},{header:'Petugas',width:22},{header:'Tarikh Ambil',width:14},{header:'Tarikh Pulang',width:14},{header:'Masa Pulang',width:12},{header:'Tujuan',width:28},{header:'Status',width:16}];
       var h=ws.getRow(1);
       h.font={bold:true,color:{argb:'FFFFFFFF'}};
       h.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF2F8F4E'}};
       h.alignment={vertical:'middle',horizontal:'center'};h.height=24;
-      loans.slice().sort(function(a,b){return (a.dari>b.dari)-(a.dari<b.dari)||(a.ts-b.ts);}).forEach(function(r,i){
-        var row=ws.addRow([i+1,'',r.kunci,r.peminjam,r.telefon||'',fmt(r.dari),fmt(r.hingga),r.tujuan||'',loanStatus(r).replace(/^[^A-Za-z]+/,'')]);
+      loans.slice().sort(function(a,b){return (a.dari>b.dari)-(a.dari<b.dari)||((a.ts||0)-(b.ts||0));}).forEach(function(r,i){
+        var row=ws.addRow([i+1,'',r.kunci,r.peminjam,r.telefon||'',r.petugas||'',fmt(r.dari),r.dipulang?fmt(r.tarikhPulang||ymd(r.dipulang)):'',r.dipulang?hm(r.dipulang):'',r.tujuan||'',r.dipulang?'Dipulang':'Belum dipulang']);
         row.height=75;row.alignment={vertical:'middle',wrapText:true};
-        [1,5,6,7].forEach(function(c){row.getCell(c).alignment={vertical:'middle',horizontal:'center'};});
+        [1,7,8,9,11].forEach(function(c){row.getCell(c).alignment={vertical:'middle',horizontal:'center'};});
         if(r.thumb){var gid=wb.addImage({base64:r.thumb,extension:'jpeg'});ws.addImage(gid,{tl:{col:1.08,row:i+1.08},ext:{width:96,height:96}});}
       });
       ws.views=[{state:'frozen',ySplit:1}];
