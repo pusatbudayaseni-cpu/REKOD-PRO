@@ -71,6 +71,8 @@ input[type=month],input[type=datetime-local]{width:100%;margin-top:4px;padding:1
 .kcard .kchk{position:absolute;top:6px;left:6px;width:24px;height:24px;margin:0;accent-color:var(--brand);pointer-events:none}
 .kcard .kbtn{position:absolute;top:4px;right:4px;border:0;border-radius:8px;background:rgba(0,0,0,.55);color:#fff;font:inherit;font-size:.78rem;padding:3px 7px;cursor:pointer}
 .kcard .kret{position:absolute;left:6px;right:6px;bottom:6px;border:0;border-radius:8px;background:var(--brand);color:var(--brand-ink);font:inherit;font-weight:700;font-size:.8rem;padding:6px;cursor:pointer}
+.row.grey{background:var(--line)}
+.row.grey img,.row.grey .t{filter:grayscale(1);opacity:.65}
 details.card>summary{cursor:pointer;font-weight:700;font-size:1.02rem}
 .pwrap{position:relative}.pwrap input{padding-right:48px}
 .eye{position:absolute;right:4px;top:8px;border:0;background:none;font-size:1.2rem;cursor:pointer;padding:6px 10px}
@@ -197,6 +199,11 @@ details.card>summary{cursor:pointer;font-weight:700;font-size:1.02rem}
       <div class="kgrid" id="kgrid"></div>
     </div>
     <div class="card">
+      <h2>👥 Senarai Peminjam (<span id="kpc">0</span>)</h2>
+      <div class="mute" style="font-size:.85rem">Kunci yang sedang dipinjam sekarang (kelabu).</div>
+      <div id="kpl"></div>
+    </div>
+    <div class="card">
       <h2>Maklumat peminjam</h2>
       <div id="ksel" class="mute" style="font-size:.92rem;margin-bottom:4px"></div>
       <label class="f" for="kp">Nama peminjam</label>
@@ -233,7 +240,7 @@ details.card>summary{cursor:pointer;font-weight:700;font-size:1.02rem}
     <div class="msg" id="kxm"></div>
     <div id="klist"></div>
   </div>
-  <p class="mute" style="font-size:.75rem;text-align:center;margin-top:28px">Versi 15 · data peribadi setiap akaun</p>
+  <p class="mute" style="font-size:.75rem;text-align:center;margin-top:28px">Versi 16 · data peribadi setiap akaun</p>
 </section>
 
 </main>
@@ -743,7 +750,25 @@ var firebaseConfig = {
     }).then(function(){say('kmsg','✅ Kunci "'+r.kunci+'" dipulangkan.');}).catch(function(e){if(btn)btn.disabled=false;say('kmsg','Gagal. '+why(e),true);});
   }
 
-  function renderKeys(){
+  function renderKeys(){renderKeysCore();renderBorrowers();}
+  function renderBorrowers(){
+    var box=$('kpl'),u=auth.currentUser;
+    var list=aktif.slice().sort(function(a,b){return (b.dari>a.dari)-(b.dari<a.dari)||(a.kunci||'').localeCompare(b.kunci||'');});
+    $('kpc').textContent=list.length;
+    if(!list.length){box.innerHTML='<div class="empty">Tiada kunci sedang dipinjam.</div>';return;}
+    box.innerHTML='';
+    list.forEach(function(a){
+      var k=keys.filter(function(x){return x.kid===a.kid;})[0];
+      var d=document.createElement('div');d.className='row grey';d.style.alignItems='center';
+      d.innerHTML=(k&&k.thumb?'<img src="'+k.thumb+'" alt="">':'')+'<div class="t"><b>🔑 '+esc(a.kunci)+'</b><div class="n">Peminjam: '+esc(a.peminjam)+'</div><div class="n">Sejak: '+fmt(a.dari)+'</div></div>';
+      if(u&&a.uid===u.uid){
+        var loan=loans.filter(function(l){return l.id===a.loanId;})[0];
+        if(loan){var rb=document.createElement('button');rb.type='button';rb.className='x';rb.style.fontSize='.85rem';rb.textContent='↩️ Pulang';rb.onclick=function(){doReturn(loan,rb);};d.appendChild(rb);}
+      }
+      box.appendChild(d);
+    });
+  }
+  function renderKeysCore(){
     var g=$('kgrid'),u=auth.currentUser;
     Object.keys(selKeys).forEach(function(id){if(actByKid(id)||!keys.some(function(k){return k.kid===id;}))delete selKeys[id];});
     $('kcnt2').textContent=keys.length;
