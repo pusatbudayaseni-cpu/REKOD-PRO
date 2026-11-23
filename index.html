@@ -112,7 +112,7 @@ details.card>summary{cursor:pointer;font-weight:700;font-size:1.02rem}
 <!-- APP -->
 <section id="appView" class="hidden">
   <div class="bar"><h1>📋 RekodPro</h1><button class="link" id="logout" type="button">Log keluar</button></div>
-  <div class="tabs"><button class="tab on" id="tabA" type="button">🗑️ Lupus</button><button class="tab" id="tabB" type="button">🕒 Check In/Out</button><button class="tab" id="tabC" type="button">🔑 Kunci</button></div>
+  <div class="tabs"><button class="tab on" id="tabA" type="button">🗑️ Lupus</button><button class="tab" id="tabB" type="button">🕒 In/Out</button><button class="tab" id="tabC" type="button">🔑 Kunci</button><button class="tab" id="tabD" type="button">📥 Borang</button></div>
   <div id="paneA">
   <p class="sub">Upload gambar barang, isi butiran, simpan. Rekod dikongsi di semua peranti.</p>
 
@@ -256,7 +256,26 @@ details.card>summary{cursor:pointer;font-weight:700;font-size:1.02rem}
     <div class="msg" id="kxm"></div>
     <div id="klist"></div>
   </div>
-  <p class="mute" style="font-size:.75rem;text-align:center;margin-top:28px">Versi 19 · data peribadi setiap akaun</p>
+  <div id="paneD" class="hidden">
+    <p class="sub">Orang boleh imbas QR, isi borang permohonan pinjaman kunci, dan permohonan mereka muncul di sini.</p>
+    <div class="card" style="text-align:center">
+      <h2 style="text-align:left">📱 QR Borang Permohonan</h2>
+      <div id="qrbox" style="display:inline-block;background:#fff;padding:12px;border-radius:12px;margin-top:6px;min-width:100px;min-height:100px"></div>
+      <input id="bfurl" type="text" readonly aria-label="Pautan borang" style="margin-top:10px">
+      <div class="two" style="margin-top:10px">
+        <button class="go" id="bfcopy" type="button" style="flex:1;margin:0">📋 Salin pautan</button>
+        <button class="go" id="bfopen" type="button" style="flex:1;margin:0;background:none;color:var(--brand);border:1px solid var(--brand)">↗️ Buka borang</button>
+      </div>
+      <div class="two" style="margin-top:8px">
+        <button class="go" id="bfdl" type="button" style="flex:1;margin:0;background:none;color:var(--brand);border:1px solid var(--brand)">⬇️ Muat turun QR</button>
+        <button class="go" id="bfprint" type="button" style="flex:1;margin:0;background:none;color:var(--brand);border:1px solid var(--brand)">🖨️ Cetak</button>
+      </div>
+      <div class="msg" id="bfmsg"></div>
+    </div>
+    <div class="top"><h2>Permohonan masuk (<span id="pmc">0</span>)</h2></div>
+    <div id="pmlist"></div>
+  </div>
+  <p class="mute" style="font-size:.75rem;text-align:center;margin-top:28px">Versi 21 · data peribadi setiap akaun</p>
 </section>
 
 </main>
@@ -615,12 +634,14 @@ var firebaseConfig = {
   function dtl(ts){var d=new Date(ts);return ymd(ts)+'T'+pad(d.getHours())+':'+pad(d.getMinutes());}
 
   function tab(w){
-    $('paneA').classList.toggle('hidden',w!=='A');$('paneB').classList.toggle('hidden',w!=='B');$('paneC').classList.toggle('hidden',w!=='C');
-    $('tabA').classList.toggle('on',w==='A');$('tabB').classList.toggle('on',w==='B');$('tabC').classList.toggle('on',w==='C');
+    $('paneA').classList.toggle('hidden',w!=='A');$('paneB').classList.toggle('hidden',w!=='B');$('paneC').classList.toggle('hidden',w!=='C');$('paneD').classList.toggle('hidden',w!=='D');
+    $('tabA').classList.toggle('on',w==='A');$('tabB').classList.toggle('on',w==='B');$('tabC').classList.toggle('on',w==='C');$('tabD').classList.toggle('on',w==='D');
+    if(w==='D')drawQr();
   }
   $('tabA').onclick=function(){tab('A');};
   $('tabB').onclick=function(){tab('B');};
   $('tabC').onclick=function(){tab('C');};
+  $('tabD').onclick=function(){tab('D');};
 
   var DAYS=['Ahad','Isnin','Selasa','Rabu','Khamis','Jumaat','Sabtu'];
   function tick(){
@@ -744,7 +765,7 @@ var firebaseConfig = {
 
 
   /* ---------- PINJAMAN KUNCI ---------- */
-  var loans=[],aktif=[],keys=[],clubs=[],selKeys={},lnUnsub=null,akUnsub=null,kyUnsub=null,PN='kunci:petugas',nkcur=null;
+  var loans=[],aktif=[],keys=[],clubs=[],statEns={},selKeys={},lnUnsub=null,akUnsub=null,kyUnsub=null,PN='kunci:petugas',nkcur=null;
   function kid(n){return (n||'').toLowerCase().trim().replace(/\s+/g,'-').replace(/[^a-z0-9-]/g,'').slice(0,40);}
   function actByKid(id){for(var i=0;i<aktif.length;i++){if(aktif[i].kid===id)return aktif[i];}return null;}
   function selList(){return keys.filter(function(k){return selKeys[k.kid];});}
@@ -757,11 +778,14 @@ var firebaseConfig = {
 
   function doReturn(r,btn){
     if(btn)btn.disabled=true;
-    var mref=db.collection('kunci_aktif').doc('k_'+r.kid);
-    return mref.get().then(function(doc){
-      var bt=db.batch(),now=Date.now();
+    var mref=db.collection('kunci_aktif').doc('k_'+r.kid),sref=db.collection('kunci_status').doc('k_'+r.kid);
+    return Promise.all([mref.get(),sref.get()]).then(function(res){
+      var doc=res[0],sd=res[1],bt=db.batch(),now=Date.now(),cu=auth.currentUser;
       bt.update(db.collection('kunci').doc(r.id),{dipulang:now,tarikhPulang:ymd(now)});
-      if(doc.exists&&doc.data().loanId===r.id)bt.delete(mref);
+      if(doc.exists&&doc.data().loanId===r.id){
+        bt.delete(mref);
+        if(sd.exists&&cu&&sd.data().uid===cu.uid){bt.delete(sref);delete statEns[r.kid];}
+      }
       return bt.commit();
     }).then(function(){say('kmsg','✅ Kunci "'+r.kunci+'" dipulangkan.');}).catch(function(e){if(btn)btn.disabled=false;say('kmsg','Gagal. '+why(e),true);});
   }
@@ -898,6 +922,7 @@ var firebaseConfig = {
       var ref=db.collection('kunci').doc();
       bt.set(ref,{uid:u.uid,by:u.email||'',kunci:k.nama,kid:k.kid,peminjam:n,kelab:kl,telefon:tel,petugas:pt,thumb:k.thumb||'',dari:a,tujuan:tujuan,ts:now,dipulang:null,tarikhPulang:''});
       bt.set(db.collection('kunci_aktif').doc('k_'+k.kid),{uid:u.uid,kid:k.kid,kunci:k.nama,peminjam:n,kelab:kl,dari:a,loanId:ref.id,aktif:true});
+      bt.set(db.collection('kunci_status').doc('k_'+k.kid),{uid:u.uid,kid:k.kid,dipinjam:true});
     });
     if(lain&&$('kkl3').checked){
       var cid=kid(kl);
@@ -936,10 +961,13 @@ var firebaseConfig = {
       var x=d.querySelector('.del'),armed=false;
       x.onclick=function(){
         if(!armed){armed=true;x.textContent='Padam?';setTimeout(function(){armed=false;x.textContent='✕';},3000);return;}
-        var mref=db.collection('kunci_aktif').doc('k_'+r.kid);
-        mref.get().then(function(doc){
-          var bt=db.batch();bt.delete(db.collection('kunci').doc(r.id));
-          if(doc.exists&&doc.data().loanId===r.id)bt.delete(mref);
+        var mref=db.collection('kunci_aktif').doc('k_'+r.kid),sref=db.collection('kunci_status').doc('k_'+r.kid);
+        Promise.all([mref.get(),sref.get()]).then(function(res){
+          var doc=res[0],sd=res[1],bt=db.batch(),cu=auth.currentUser;bt.delete(db.collection('kunci').doc(r.id));
+          if(doc.exists&&doc.data().loanId===r.id){
+            bt.delete(mref);
+            if(sd.exists&&cu&&sd.data().uid===cu.uid){bt.delete(sref);delete statEns[r.kid];}
+          }
           return bt.commit();
         }).catch(function(e){say('kmsg','Gagal padam. '+why(e),true);});
       };
@@ -1005,6 +1033,10 @@ var firebaseConfig = {
     },function(){say('kmsg','Gagal memuatkan pinjaman. Semak peraturan Firestore untuk "kunci".',true);});
     akUnsub=db.collection('kunci_aktif').onSnapshot(function(sn){
       aktif=sn.docs.map(function(d){var o=d.data();o.id=d.id;return o;}).filter(function(x){return x.aktif===true;});
+      var cu=auth.currentUser;
+      if(cu)aktif.forEach(function(a2){
+        if(a2.uid===cu.uid&&!statEns[a2.kid]){statEns[a2.kid]=1;db.collection('kunci_status').doc('k_'+a2.kid).set({uid:cu.uid,kid:a2.kid,dipinjam:true}).catch(function(){delete statEns[a2.kid];});}
+      });
       renderKeys();
     },function(){say('kmsg','Gagal menyemak ketersediaan. Semak peraturan Firestore untuk "kunci_aktif".',true);});
     kyUnsub=db.collection('kunci_senarai').onSnapshot(function(sn){
@@ -1044,6 +1076,96 @@ var firebaseConfig = {
     }catch(e){say('kxm','Export gagal. Cuba lagi.',true);}
     finally{btn.disabled=false;btn.textContent='📥 Muat Turun Excel (Kunci)';}
   };
+
+  /* ---------- BORANG QR / PERMOHONAN ---------- */
+  var pms=[],pmUnsub=null,qrDone=false;
+  var formUrl=location.origin+location.pathname.replace(/[^\/]*$/,'')+'borang.html';
+  $('bfurl').value=formUrl;
+  function drawQr(){
+    if(qrDone)return;
+    var pr=window.QRCode?Promise.resolve():loadScript('https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js');
+    pr.then(function(){
+      var box=$('qrbox');box.innerHTML='';
+      new QRCode(box,{text:formUrl,width:240,height:240,correctLevel:QRCode.CorrectLevel.M});
+      qrDone=true;
+    }).catch(function(){say('bfmsg','Gagal memuatkan penjana QR. Semak internet.',true);});
+  }
+  function qrDataUrl(){var c=$('qrbox').querySelector('canvas');if(c)return c.toDataURL('image/png');var im=$('qrbox').querySelector('img');return im?im.src:'';}
+  $('bfcopy').onclick=function(){
+    var done=function(){say('bfmsg','✅ Pautan disalin.');};
+    var fb=function(){$('bfurl').select();say('bfmsg','Tekan Ctrl+C untuk salin pautan yang dipilih.');};
+    if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(formUrl).then(done).catch(fb);}else fb();
+  };
+  $('bfopen').onclick=function(){window.open(formUrl,'_blank','noopener');};
+  $('bfdl').onclick=function(){
+    var u=qrDataUrl();if(!u){say('bfmsg','QR belum sedia. Tunggu sebentar.',true);return;}
+    var a=document.createElement('a');a.href=u;a.download='qr-borang-rekodpro.png';document.body.appendChild(a);a.click();a.remove();
+  };
+  $('bfprint').onclick=function(){
+    var u=qrDataUrl();if(!u){say('bfmsg','QR belum sedia. Tunggu sebentar.',true);return;}
+    var w=window.open('','_blank');
+    if(!w){say('bfmsg','Pop-up disekat. Benarkan pop-up atau muat turun QR dahulu.',true);return;}
+    w.document.write('<title>QR Borang</title><body style="font-family:sans-serif;text-align:center;padding:40px"><h1>Imbas untuk memohon pinjaman kunci</h1><img src="'+u+'" style="width:320px"><p style="font-size:18px">'+formUrl+'</p></body>');
+    w.document.close();setTimeout(function(){w.print();},300);
+  };
+
+  function pmTime(r){var ms=(r.ts&&r.ts.toMillis)?r.ts.toMillis():0;return ms?fmt(ymd(ms))+' '+hm(ms):'';}
+  function usePm(r){
+    $('kp').value=r.nama||'';$('ktel').value=r.telefon||'';
+    var kl=(r.kelab||'').trim(),sel=$('kkl');
+    if(!kl){sel.value='';}
+    else if(clubs.some(function(c){return c.nama===kl;})){sel.value=kl;}
+    else if(kl.toLowerCase()==='individu'){sel.value='Individu';}
+    else{sel.value='__lain';$('kkl2').value=kl;}
+    klToggle();
+    if(r.tarikh)$('kd1').value=r.tarikh;
+    $('kt').value=((r.tujuan||'')+(r.kunci?(r.tujuan?' | ':'')+'Kunci dipohon: '+r.kunci:'')).slice(0,200);
+    selKeys={};
+    var ticked=0;(r.kids||[]).forEach(function(id){if(keys.some(function(k){return k.kid===id;})&&!actByKid(id)){selKeys[id]=true;ticked++;}});
+    renderKeys();
+    tab('C');
+    say('kmsg','Maklumat dari permohonan "'+(r.nama||'')+'" sudah diisi'+(ticked?' dan '+ticked+' kunci yang dipohon sudah ditanda':'')+'. Semak, kemudian tekan Pinjam.');
+    window.scrollTo({top:Math.max(0,$('ksel').getBoundingClientRect().top+window.scrollY-90),behavior:'smooth'});
+  }
+  function renderPm(){
+    var box=$('pmlist'),baru=pms.filter(function(r){return r.status!=='selesai';}).length;
+    $('pmc').textContent=pms.length;
+    $('tabD').textContent='📥 Borang'+(baru?' ('+baru+')':'');
+    if(!pms.length){box.innerHTML='<div class="empty">Belum ada permohonan.</div>';return;}
+    box.innerHTML='';
+    pms.forEach(function(r){
+      var done=r.status==='selesai',tel=String(r.telefon||'').replace(/[^\d+]/g,'');
+      var d=document.createElement('div');d.className='row';
+      d.innerHTML='<div class="t"><b>'+esc(r.nama)+'</b> <span class="n">'+(done?'✅ Selesai':'🆕 Baru')+'</span>'+
+        (r.kelab?'<div class="n">Kelab: '+esc(r.kelab)+'</div>':'')+
+        '<div class="n">📞 <a href="tel:'+esc(tel)+'" style="color:inherit">'+esc(r.telefon)+'</a></div>'+
+        '<div class="n">Kunci: '+esc(r.kunci)+'</div>'+
+        '<div class="n">Tarikh ambil: '+fmt(r.tarikh)+'</div>'+
+        (r.tujuan?'<div class="n">'+esc(r.tujuan)+'</div>':'')+
+        '<div class="n">Dihantar: '+esc(pmTime(r))+'</div></div>'+
+        '<div style="display:flex;flex-direction:column;gap:4px">'+
+        '<button class="x use" type="button" style="font-size:.85rem">➡️ Guna</button>'+
+        (done?'':'<button class="x ok" type="button" style="font-size:.85rem">✅ Selesai</button>')+
+        '<button class="x del" type="button" aria-label="Padam">✕</button></div>';
+      d.querySelector('.use').onclick=function(){usePm(r);};
+      var okb=d.querySelector('.ok');
+      if(okb)okb.onclick=function(){okb.disabled=true;db.collection('permohonan').doc(r.id).update({status:'selesai'}).catch(function(e){okb.disabled=false;say('bfmsg','Gagal. '+why(e),true);});};
+      var x=d.querySelector('.del'),armed=false;
+      x.onclick=function(){
+        if(!armed){armed=true;x.textContent='Padam?';setTimeout(function(){armed=false;x.textContent='✕';},3000);return;}
+        db.collection('permohonan').doc(r.id).delete().catch(function(e){say('bfmsg','Gagal padam. '+why(e),true);});
+      };
+      box.appendChild(d);
+    });
+  }
+  auth.onAuthStateChanged(function(u){
+    if(pmUnsub){pmUnsub();pmUnsub=null;}
+    if(!u){pms=[];renderPm();return;}
+    pmUnsub=db.collection('permohonan').orderBy('ts','desc').limit(200).onSnapshot(function(sn){
+      pms=sn.docs.map(function(d){var o=d.data();o.id=d.id;return o;});renderPm();
+    },function(){say('bfmsg','Gagal memuatkan permohonan. Semak peraturan Firestore untuk "permohonan".',true);});
+  });
+  renderPm();
 })();
 </script>
 </body>
